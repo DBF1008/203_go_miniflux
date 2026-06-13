@@ -221,21 +221,63 @@ func (s *Storage) UpdateCategory(category *model.Category) error {
 	return nil
 }
 
-// RemoveCategory deletes a category.
+// RemoveCategory deletes a category. Feeds belonging to the deleted category
+// are reassigned to the user's first remaining category (alphabetically by
+// title) so that no feed data is silently cascade-deleted.
 func (s *Storage) RemoveCategory(userID, categoryID int64) error {
-	query := `DELETE FROM categories WHERE id = $1 AND user_id = $2`
-	result, err := s.db.Exec(query, categoryID, userID)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return fmt.Errorf(`store: unable to begin transaction: %v`, err)
+	}
+
+	// Ensure at least one other category will remain after deletion.
+	var remainingCount int
+	err = tx.QueryRow(`SELECT count(*) FROM categories WHERE user_id = $1 AND id != $2`, userID, categoryID).Scan(&remainingCount)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf(`store: unable to retrieve category count: %v`, err)
+	}
+	if remainingCount < 1 {
+		tx.Rollback()
+		return errors.New(`store: at least 1 category must remain after deletion`)
+	}
+
+	// Reassign feeds from the deleted category to the user's first remaining category.
+	query := `
+		UPDATE feeds
+		SET category_id = (
+			SELECT id FROM categories
+			WHERE user_id = $1 AND id != $2
+			ORDER BY title ASC
+			LIMIT 1
+		)
+		WHERE user_id = $1 AND category_id = $2
+	`
+	_, err = tx.Exec(query, userID, categoryID)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf(`store: unable to reassign feeds from category: %v`, err)
+	}
+
+	// Now it is safe to delete the (empty) category.
+	result, err := tx.Exec(`DELETE FROM categories WHERE id = $1 AND user_id = $2`, categoryID, userID)
+	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf(`store: unable to remove this category: %v`, err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf(`store: unable to remove this category: %v`, err)
 	}
-
 	if count == 0 {
+		tx.Rollback()
 		return errors.New(`store: no category has been removed`)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(`store: unable to commit transaction: %v`, err)
 	}
 
 	return nil
@@ -285,6 +327,8 @@ func (s *Storage) RemoveAndReplaceCategoriesByName(userid int64, titles []string
 		tx.Rollback()
 		return fmt.Errorf("store: unable to delete categories: %v", err)
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: unable to commit transaction: %v", err)
+	}
 	return nil
 }
