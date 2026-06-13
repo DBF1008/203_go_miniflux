@@ -662,6 +662,7 @@ func (s *Storage) HasSaveEntry(userID int64) (result bool) {
 				readeck_enabled='t' OR
 				shaarli_enabled='t' OR
 				webhook_enabled='t' OR
+				EXISTS(SELECT 1 FROM feeds WHERE feeds.user_id = integrations.user_id AND feeds.webhook_url != '') OR
 				omnivore_enabled='t' OR
 				karakeep_enabled='t' OR
 				raindrop_enabled='t' OR

@@ -61,16 +61,19 @@ func (h *handler) updateIntegration(w http.ResponseWriter, r *http.Request) {
 		integration.GoogleReaderPassword = ""
 	}
 
+	if integration.WebhookSecret == "" {
+		integration.WebhookSecret = crypto.GenerateRandomStringHex(32)
+	}
+
 	if integrationForm.WebhookEnabled {
 		if integrationForm.WebhookURL == "" {
 			integration.WebhookEnabled = false
-			integration.WebhookSecret = ""
-		} else if integration.WebhookSecret == "" {
-			integration.WebhookSecret = crypto.GenerateRandomStringHex(32)
+		} else {
+			integration.WebhookEnabled = true
 		}
 	} else {
+		integration.WebhookEnabled = false
 		integration.WebhookURL = ""
-		integration.WebhookSecret = ""
 	}
 
 	if integrationForm.LinktacoEnabled {

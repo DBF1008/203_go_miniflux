@@ -419,14 +419,14 @@ func SendEntry(entry *model.Entry, userIntegrations *model.Integration) {
 		}
 	}
 
-	if userIntegrations.WebhookEnabled {
-		var webhookURL string
-		if entry.Feed != nil && entry.Feed.WebhookURL != "" {
-			webhookURL = entry.Feed.WebhookURL
-		} else {
-			webhookURL = userIntegrations.WebhookURL
-		}
+	var webhookURL string
+	if entry.Feed != nil && entry.Feed.WebhookURL != "" {
+		webhookURL = entry.Feed.WebhookURL
+	} else if userIntegrations.WebhookEnabled {
+		webhookURL = userIntegrations.WebhookURL
+	}
 
+	if webhookURL != "" {
 		slog.Debug("Sending entry to Webhook",
 			slog.Int64("user_id", userIntegrations.UserID),
 			slog.Int64("entry_id", entry.ID),
@@ -533,14 +533,14 @@ func PushEntries(feed *model.Feed, entries model.Entries, userIntegrations *mode
 			)
 		}
 	}
-	if userIntegrations.WebhookEnabled {
-		var webhookURL string
-		if feed.WebhookURL != "" {
-			webhookURL = feed.WebhookURL
-		} else {
-			webhookURL = userIntegrations.WebhookURL
-		}
+	var webhookURL string
+	if feed.WebhookURL != "" {
+		webhookURL = feed.WebhookURL
+	} else if userIntegrations.WebhookEnabled {
+		webhookURL = userIntegrations.WebhookURL
+	}
 
+	if webhookURL != "" {
 		slog.Debug("Sending new entries to Webhook",
 			slog.Int64("user_id", userIntegrations.UserID),
 			slog.Int("nb_entries", len(entries)),
