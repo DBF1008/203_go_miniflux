@@ -76,10 +76,10 @@ func (h *handler) refreshFeedHandler(w http.ResponseWriter, r *http.Request) {
 func (h *handler) refreshAllFeedsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := request.UserID(r)
 
+	// Manual refresh: ignore next_check_at schedule and error count,
+	// but still skip disabled feeds and honour per-host rate limiting.
 	jobs, err := h.store.NewBatchBuilder().
-		WithErrorLimit(config.Opts.PollingParsingErrorLimit()).
 		WithoutDisabledFeeds().
-		WithNextCheckExpired().
 		WithUserID(userID).
 		WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 		FetchJobs()

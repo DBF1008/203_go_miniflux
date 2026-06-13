@@ -1846,6 +1846,40 @@ func TestRefreshFeedEndpoint(t *testing.T) {
 	}
 }
 
+func TestRefreshCategoryEndpoint(t *testing.T) {
+	testConfig := newIntegrationTestConfig()
+	if !testConfig.isConfigured() {
+		t.Skip(skipIntegrationTestsMessage)
+	}
+
+	adminClient := miniflux.NewClient(testConfig.testBaseURL, testConfig.testAdminUsername, testConfig.testAdminPassword)
+
+	regularTestUser, err := adminClient.CreateUser(testConfig.genRandomUsername(), testConfig.testRegularPassword, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminClient.DeleteUser(regularTestUser.ID)
+
+	regularUserClient := miniflux.NewClient(testConfig.testBaseURL, regularTestUser.Username, testConfig.testRegularPassword)
+
+	category, err := regularUserClient.CreateCategory("Test Category")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = regularUserClient.CreateFeed(&miniflux.FeedCreationRequest{
+		FeedURL:     testConfig.testFeedURL,
+		CategoryID:  category.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := regularUserClient.RefreshCategory(category.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGetFeedEndpoint(t *testing.T) {
 	testConfig := newIntegrationTestConfig()
 	if !testConfig.isConfigured() {

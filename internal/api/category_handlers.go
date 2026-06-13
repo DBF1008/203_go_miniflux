@@ -163,12 +163,12 @@ func (h *handler) refreshCategoryHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Manual refresh: ignore next_check_at schedule and error count,
+	// but still skip disabled feeds and honour per-host rate limiting.
 	jobs, err := h.store.NewBatchBuilder().
-		WithErrorLimit(config.Opts.PollingParsingErrorLimit()).
 		WithoutDisabledFeeds().
 		WithUserID(userID).
 		WithCategoryID(categoryID).
-		WithNextCheckExpired().
 		WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 		FetchJobs()
 	if err != nil {
