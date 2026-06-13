@@ -4,10 +4,12 @@
 package ui // import "miniflux.app/v2/internal/ui"
 
 import (
+	"errors"
 	"net/http"
 
 	"miniflux.app/v2/internal/http/request"
 	"miniflux.app/v2/internal/http/response"
+	"miniflux.app/v2/internal/storage"
 )
 
 func (h *handler) removeCategory(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +32,10 @@ func (h *handler) removeCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.RemoveCategory(user.ID, category.ID); err != nil {
+		if errors.Is(err, storage.ErrCategoryCannotBeRemoved) {
+			response.HTMLBadRequest(w, r, err)
+			return
+		}
 		response.HTMLServerError(w, r, err)
 		return
 	}

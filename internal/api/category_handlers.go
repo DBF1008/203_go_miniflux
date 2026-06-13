@@ -14,6 +14,7 @@ import (
 	"miniflux.app/v2/internal/http/request"
 	"miniflux.app/v2/internal/http/response"
 	"miniflux.app/v2/internal/model"
+	"miniflux.app/v2/internal/storage"
 	"miniflux.app/v2/internal/validator"
 )
 
@@ -147,6 +148,10 @@ func (h *handler) removeCategoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.store.RemoveCategory(userID, categoryID); err != nil {
+		if errors.Is(err, storage.ErrCategoryCannotBeRemoved) {
+			response.JSONBadRequest(w, r, err)
+			return
+		}
 		response.JSONServerError(w, r, err)
 		return
 	}

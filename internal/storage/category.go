@@ -221,21 +221,71 @@ func (s *Storage) UpdateCategory(category *model.Category) error {
 	return nil
 }
 
-// RemoveCategory deletes a category.
+// ErrCategoryCannotBeRemoved is returned when a category cannot be removed
+// because it is the user's only category. Feeds require a category
+// (feeds.category_id is NOT NULL), so there would be nowhere to reassign them.
+var ErrCategoryCannotBeRemoved = errors.New(`store: cannot remove the only category`)
+
+// RemoveCategory deletes a category, reassigning its feeds to the user's first
+// remaining category beforehand. Even though feeds.category_id has an ON DELETE
+// CASCADE, deleting a category must never silently delete its feeds (and their
+// entries); reassigning first ensures the cascade never fires. This mirrors the
+// safer semantics of RemoveAndReplaceCategoriesByName for a single category.
 func (s *Storage) RemoveCategory(userID, categoryID int64) error {
-	query := `DELETE FROM categories WHERE id = $1 AND user_id = $2`
-	result, err := s.db.Exec(query, categoryID, userID)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return fmt.Errorf(`store: unable to begin transaction: %v`, err)
+	}
+
+	// Pick the user's first other category (by title) to receive the feeds. If
+	// none exists this is the only category, and removing it would orphan its
+	// feeds, so the deletion is refused.
+	var replacementID int64
+	err = tx.QueryRow(
+		`SELECT id FROM categories WHERE user_id = $1 AND id != $2 ORDER BY title ASC LIMIT 1`,
+		userID,
+		categoryID,
+	).Scan(&replacementID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		tx.Rollback()
+		return ErrCategoryCannotBeRemoved
+	case err != nil:
+		tx.Rollback()
+		return fmt.Errorf(`store: unable to find a replacement category: %v`, err)
+	}
+
+	// Reassign feeds before deleting the category so the ON DELETE CASCADE on
+	// feeds.category_id never removes any feed.
+	if _, err = tx.Exec(
+		`UPDATE feeds SET category_id = $1 WHERE user_id = $2 AND category_id = $3`,
+		replacementID,
+		userID,
+		categoryID,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf(`store: unable to reassign feeds before removing category: %v`, err)
+	}
+
+	result, err := tx.Exec(`DELETE FROM categories WHERE id = $1 AND user_id = $2`, categoryID, userID)
+	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf(`store: unable to remove this category: %v`, err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
+		tx.Rollback()
 		return fmt.Errorf(`store: unable to remove this category: %v`, err)
 	}
 
 	if count == 0 {
+		tx.Rollback()
 		return errors.New(`store: no category has been removed`)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(`store: unable to commit transaction: %v`, err)
 	}
 
 	return nil

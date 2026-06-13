@@ -1225,6 +1225,85 @@ func TestCannotDeleteCategoryOfAnotherUser(t *testing.T) {
 	}
 }
 
+func TestCannotDeleteLastCategory(t *testing.T) {
+	testConfig := newIntegrationTestConfig()
+	if !testConfig.isConfigured() {
+		t.Skip(skipIntegrationTestsMessage)
+	}
+
+	adminClient := miniflux.NewClient(testConfig.testBaseURL, testConfig.testAdminUsername, testConfig.testAdminPassword)
+
+	regularTestUser, err := adminClient.CreateUser(testConfig.genRandomUsername(), testConfig.testRegularPassword, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminClient.DeleteUser(regularTestUser.ID)
+
+	regularUserClient := miniflux.NewClient(testConfig.testBaseURL, regularTestUser.Username, testConfig.testRegularPassword)
+
+	categories, err := regularUserClient.Categories()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(categories) != 1 {
+		t.Fatalf(`A new user should have exactly one category, got %d`, len(categories))
+	}
+
+	if err := regularUserClient.DeleteCategory(categories[0].ID); err == nil {
+		t.Fatalf(`Deleting the only category should raise an error`)
+	}
+}
+
+func TestDeleteCategoryReassignsFeeds(t *testing.T) {
+	testConfig := newIntegrationTestConfig()
+	if !testConfig.isConfigured() {
+		t.Skip(skipIntegrationTestsMessage)
+	}
+
+	adminClient := miniflux.NewClient(testConfig.testBaseURL, testConfig.testAdminUsername, testConfig.testAdminPassword)
+
+	regularTestUser, err := adminClient.CreateUser(testConfig.genRandomUsername(), testConfig.testRegularPassword, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminClient.DeleteUser(regularTestUser.ID)
+
+	regularUserClient := miniflux.NewClient(testConfig.testBaseURL, regularTestUser.Username, testConfig.testRegularPassword)
+
+	category, err := regularUserClient.CreateCategory("My category")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	feedID, err := regularUserClient.CreateFeed(&miniflux.FeedCreationRequest{
+		FeedURL:    testConfig.testFeedURL,
+		CategoryID: category.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := regularUserClient.DeleteCategory(category.ID); err != nil {
+		t.Fatalf(`Deleting a category that has feeds should not raise an error: %v`, err)
+	}
+
+	// The feed must survive the deletion (no silent cascade) and be reassigned to
+	// the user's remaining "All" category.
+	feed, err := regularUserClient.Feed(feedID)
+	if err != nil {
+		t.Fatalf(`The feed should still exist after deleting its category, got error: %v`, err)
+	}
+
+	if feed.Category == nil {
+		t.Fatalf(`The reassigned feed should still belong to a category`)
+	}
+
+	if feed.Category.Title != "All" {
+		t.Errorf(`The feed should be reassigned to the "All" category, got %q`, feed.Category.Title)
+	}
+}
+
 func TestGetCategoriesEndpoint(t *testing.T) {
 	testConfig := newIntegrationTestConfig()
 	if !testConfig.isConfigured() {
