@@ -373,8 +373,8 @@ func (s *Storage) ArchiveEntries(status string, interval time.Duration, limit in
 				status=$1 AND
 				starred is false AND
 				share_code='' AND
-				created_at < now() - $2::interval
-			ORDER BY created_at ASC
+				changed_at < now() - $2::interval
+			ORDER BY changed_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT $3
 		), deleted AS (
