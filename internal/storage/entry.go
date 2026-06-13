@@ -359,7 +359,12 @@ func (s *Storage) RefreshFeedEntries(userID, feedID int64, entries model.Entries
 	return newEntries, nil
 }
 
-// ArchiveEntries deletes entries older than the given interval and records tombstones so they are not re-ingested.
+// ArchiveEntries deletes entries whose last status or interaction change (changed_at)
+// is older than the given interval and records tombstones so they are not re-ingested.
+//
+// changed_at — not created_at — is used so that an old entry the user has recently
+// interacted with (re-marked unread, status changed, or bulk-processed) is retained,
+// matching the interaction-recency semantics used by the history page and elsewhere.
 func (s *Storage) ArchiveEntries(status string, interval time.Duration, limit int) (int64, error) {
 	if interval < 0 || limit <= 0 {
 		return 0, nil
@@ -373,8 +378,8 @@ func (s *Storage) ArchiveEntries(status string, interval time.Duration, limit in
 				status=$1 AND
 				starred is false AND
 				share_code='' AND
-				created_at < now() - $2::interval
-			ORDER BY created_at ASC
+				changed_at < now() - $2::interval
+			ORDER BY changed_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT $3
 		), deleted AS (
