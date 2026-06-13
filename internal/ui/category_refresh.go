@@ -38,8 +38,7 @@ func (h *handler) refreshCategory(w http.ResponseWriter, r *http.Request) int64 
 		// We allow the end-user to force refresh all its feeds in this category
 		// without taking into consideration the number of errors.
 		jobs, err := h.store.NewBatchBuilder().
-			WithoutDisabledFeeds().
-			WithUserID(userID).
+			WithManualRefreshScope(userID).
 			WithCategoryID(categoryID).
 			WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 			FetchJobs()

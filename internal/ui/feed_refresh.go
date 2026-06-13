@@ -43,8 +43,7 @@ func (h *handler) refreshAllFeeds(w http.ResponseWriter, r *http.Request) {
 		// We allow the end-user to force refresh all its feeds
 		// without taking into consideration the number of errors.
 		jobs, err := h.store.NewBatchBuilder().
-			WithoutDisabledFeeds().
-			WithUserID(userID).
+			WithManualRefreshScope(userID).
 			WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 			FetchJobs()
 		if err != nil {

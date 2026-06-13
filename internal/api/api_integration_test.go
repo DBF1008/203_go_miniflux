@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	miniflux "miniflux.app/v2/client"
 	"miniflux.app/v2/internal/model"
@@ -1813,8 +1814,102 @@ func TestRefreshAllFeedsEndpoint(t *testing.T) {
 
 	regularUserClient := miniflux.NewClient(testConfig.testBaseURL, regularTestUser.Username, testConfig.testRegularPassword)
 
+	feedID, err := regularUserClient.CreateFeed(&miniflux.FeedCreationRequest{
+		FeedURL: testConfig.testFeedURL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Refresh the feed once so its next_check_at is scheduled in the future: the feed is
+	// now explicitly "not due". A manual "refresh all" must still pick it up, otherwise it
+	// silently skips feeds the user asked to refresh.
+	if err := regularUserClient.RefreshFeed(feedID); err != nil {
+		t.Fatal(err)
+	}
+
+	feedBefore, err := regularUserClient.Feed(feedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := regularUserClient.RefreshAllFeeds(); err != nil {
 		t.Fatal(err)
+	}
+
+	waitForFeedRecheck(t, regularUserClient, feedID, feedBefore.CheckedAt)
+}
+
+func TestRefreshCategoryFeedsEndpoint(t *testing.T) {
+	testConfig := newIntegrationTestConfig()
+	if !testConfig.isConfigured() {
+		t.Skip(skipIntegrationTestsMessage)
+	}
+
+	adminClient := miniflux.NewClient(testConfig.testBaseURL, testConfig.testAdminUsername, testConfig.testAdminPassword)
+
+	regularTestUser, err := adminClient.CreateUser(testConfig.genRandomUsername(), testConfig.testRegularPassword, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminClient.DeleteUser(regularTestUser.ID)
+
+	regularUserClient := miniflux.NewClient(testConfig.testBaseURL, regularTestUser.Username, testConfig.testRegularPassword)
+
+	category, err := regularUserClient.CreateCategory("Refresh test category")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	feedID, err := regularUserClient.CreateFeed(&miniflux.FeedCreationRequest{
+		FeedURL:    testConfig.testFeedURL,
+		CategoryID: category.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same guarantee as the refresh-all test, scoped to a category: a not-due feed in the
+	// category must still be refreshed.
+	if err := regularUserClient.RefreshFeed(feedID); err != nil {
+		t.Fatal(err)
+	}
+
+	feedBefore, err := regularUserClient.Feed(feedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := regularUserClient.RefreshCategoryFeeds(category.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForFeedRecheck(t, regularUserClient, feedID, feedBefore.CheckedAt)
+}
+
+// waitForFeedRecheck polls the feed until its CheckedAt timestamp advances past notBefore,
+// which proves a background refresh actually re-checked the feed. The manual refresh is
+// asynchronous (the handler enqueues jobs and returns immediately), so we poll with a
+// bounded timeout and fail the test if the feed is never re-checked.
+func waitForFeedRecheck(t *testing.T, client *miniflux.Client, feedID int64, notBefore time.Time) {
+	t.Helper()
+
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		feed, err := client.Feed(feedID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if feed.CheckedAt.After(notBefore) {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("feed %d was not re-checked after a manual refresh (checked_at=%s, expected after %s)", feedID, feed.CheckedAt, notBefore)
+		}
+
+		time.Sleep(time.Second)
 	}
 }
 

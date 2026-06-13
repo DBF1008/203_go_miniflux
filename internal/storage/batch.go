@@ -70,9 +70,20 @@ func (b *batchBuilder) WithLimitPerHost(limit int) *batchBuilder {
 	return b
 }
 
-// FetchJobs retrieves a batch of jobs based on the conditions set in the builder.
-// When limitPerHost is set, it limits the number of jobs per feed hostname to prevent overwhelming a single host.
-func (b *batchBuilder) FetchJobs() (model.JobList, error) {
+// WithManualRefreshScope selects every refreshable (non-disabled) feed belonging to the
+// given user, regardless of next_check_at or parsing error count. It is the shared
+// selection used by the manual "refresh all feeds" and "refresh category feeds" entry
+// points in both the web UI and the API, so those entry points stay consistent and
+// actually cover every feed the user asked to refresh. Callers add WithCategoryID to
+// narrow the scope to a category and WithLimitPerHost to throttle requests per host.
+func (b *batchBuilder) WithManualRefreshScope(userID int64) *batchBuilder {
+	return b.WithoutDisabledFeeds().WithUserID(userID)
+}
+
+// buildQuery assembles the SQL statement and its bind arguments from the configured
+// conditions. It performs no database access, which makes the generated query directly
+// testable.
+func (b *batchBuilder) buildQuery() (string, []any) {
 	query := `SELECT id, user_id, feed_url FROM feeds`
 
 	if len(b.conditions) > 0 {
@@ -85,7 +96,15 @@ func (b *batchBuilder) FetchJobs() (model.JobList, error) {
 		query += " LIMIT " + strconv.Itoa(b.batchSize)
 	}
 
-	rows, err := b.db.Query(query, b.args...)
+	return query, b.args
+}
+
+// FetchJobs retrieves a batch of jobs based on the conditions set in the builder.
+// When limitPerHost is set, it limits the number of jobs per feed hostname to prevent overwhelming a single host.
+func (b *batchBuilder) FetchJobs() (model.JobList, error) {
+	query, args := b.buildQuery()
+
+	rows, err := b.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf(`store: unable to fetch batch of jobs: %v`, err)
 	}

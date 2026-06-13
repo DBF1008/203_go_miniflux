@@ -164,11 +164,8 @@ func (h *handler) refreshCategoryHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	jobs, err := h.store.NewBatchBuilder().
-		WithErrorLimit(config.Opts.PollingParsingErrorLimit()).
-		WithoutDisabledFeeds().
-		WithUserID(userID).
+		WithManualRefreshScope(userID).
 		WithCategoryID(categoryID).
-		WithNextCheckExpired().
 		WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 		FetchJobs()
 	if err != nil {

@@ -771,6 +771,19 @@ func (c *Client) RefreshAllFeedsContext(ctx context.Context) error {
 	return err
 }
 
+// RefreshCategoryFeeds refreshes all feeds of a category.
+func (c *Client) RefreshCategoryFeeds(categoryID int64) error {
+	ctx, cancel := withDefaultTimeout()
+	defer cancel()
+	return c.RefreshCategoryFeedsContext(ctx, categoryID)
+}
+
+// RefreshCategoryFeedsContext refreshes all feeds of a category.
+func (c *Client) RefreshCategoryFeedsContext(ctx context.Context, categoryID int64) error {
+	_, err := c.request.Put(ctx, fmt.Sprintf("/v1/categories/%d/refresh", categoryID), nil)
+	return err
+}
+
 // RefreshFeed refreshes a feed.
 func (c *Client) RefreshFeed(feedID int64) error {
 	ctx, cancel := withDefaultTimeout()

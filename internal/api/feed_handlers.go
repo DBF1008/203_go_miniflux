@@ -77,10 +77,7 @@ func (h *handler) refreshAllFeedsHandler(w http.ResponseWriter, r *http.Request)
 	userID := request.UserID(r)
 
 	jobs, err := h.store.NewBatchBuilder().
-		WithErrorLimit(config.Opts.PollingParsingErrorLimit()).
-		WithoutDisabledFeeds().
-		WithNextCheckExpired().
-		WithUserID(userID).
+		WithManualRefreshScope(userID).
 		WithLimitPerHost(config.Opts.PollingLimitPerHost()).
 		FetchJobs()
 	if err != nil {
