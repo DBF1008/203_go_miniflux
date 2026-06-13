@@ -37,6 +37,23 @@ import (
 	"miniflux.app/v2/internal/model"
 )
 
+// webhookURLForFeed returns the webhook endpoint to notify for the given feed,
+// or an empty string when no webhook should be sent.
+//
+// A feed-level webhook URL always takes precedence and works on its own, even
+// when the global webhook integration is disabled. When the feed has no
+// dedicated URL, the global webhook URL is used only if the integration is
+// enabled. The webhook secret and signature are shared in all cases.
+func webhookURLForFeed(feed *model.Feed, userIntegrations *model.Integration) string {
+	if feed != nil && feed.WebhookURL != "" {
+		return feed.WebhookURL
+	}
+	if userIntegrations.WebhookEnabled {
+		return userIntegrations.WebhookURL
+	}
+	return ""
+}
+
 // SendEntry sends the entry to third-party providers when the user click on "Save".
 func SendEntry(entry *model.Entry, userIntegrations *model.Integration) {
 	if userIntegrations.BetulaEnabled {
@@ -419,14 +436,7 @@ func SendEntry(entry *model.Entry, userIntegrations *model.Integration) {
 		}
 	}
 
-	if userIntegrations.WebhookEnabled {
-		var webhookURL string
-		if entry.Feed != nil && entry.Feed.WebhookURL != "" {
-			webhookURL = entry.Feed.WebhookURL
-		} else {
-			webhookURL = userIntegrations.WebhookURL
-		}
-
+	if webhookURL := webhookURLForFeed(entry.Feed, userIntegrations); webhookURL != "" {
 		slog.Debug("Sending entry to Webhook",
 			slog.Int64("user_id", userIntegrations.UserID),
 			slog.Int64("entry_id", entry.ID),
@@ -533,14 +543,7 @@ func PushEntries(feed *model.Feed, entries model.Entries, userIntegrations *mode
 			)
 		}
 	}
-	if userIntegrations.WebhookEnabled {
-		var webhookURL string
-		if feed.WebhookURL != "" {
-			webhookURL = feed.WebhookURL
-		} else {
-			webhookURL = userIntegrations.WebhookURL
-		}
-
+	if webhookURL := webhookURLForFeed(feed, userIntegrations); webhookURL != "" {
 		slog.Debug("Sending new entries to Webhook",
 			slog.Int64("user_id", userIntegrations.UserID),
 			slog.Int("nb_entries", len(entries)),

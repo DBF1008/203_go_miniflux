@@ -669,7 +669,8 @@ func (s *Storage) HasSaveEntry(userID int64) (result bool) {
 				cubox_enabled='t' OR
 				discord_enabled='t' OR
 				slack_enabled='t' OR
-				archiveorg_enabled='t'
+				archiveorg_enabled='t' OR
+				EXISTS (SELECT 1 FROM feeds WHERE feeds.user_id = integrations.user_id AND feeds.webhook_url <> '')
 			)
 	`
 	if err := s.db.QueryRow(query, userID).Scan(&result); err != nil {

@@ -57,7 +57,8 @@ func (s *Storage) GetNavMetadata(userID int64) (NavMetadata, error) {
 					cubox_enabled='t' OR
 					discord_enabled='t' OR
 					slack_enabled='t' OR
-					archiveorg_enabled='t'
+					archiveorg_enabled='t' OR
+					EXISTS (SELECT 1 FROM feeds WHERE feeds.user_id = integrations.user_id AND feeds.webhook_url <> '')
 				   )
 			)) AS has_save_entry,
 	`
