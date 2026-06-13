@@ -81,7 +81,16 @@ func (b *batchBuilder) FetchJobs() (model.JobList, error) {
 
 	query += " ORDER BY next_check_at ASC"
 
-	if b.batchSize > 0 {
+	// When a per-host limit is enforced, the batch cannot be bounded with a SQL
+	// LIMIT: a single host with a large backlog of overdue feeds would fill the
+	// whole window and, once its per-host quota is reached, the remaining slots
+	// would simply be skipped — leaving feeds hosted elsewhere starved batch after
+	// batch. Instead we stream the candidates in next_check_at order and let the
+	// selector enforce both the per-host quota and the batch size, scanning far
+	// enough to fill the batch fairly from other hosts (it stops early once the
+	// batch is full). Without a per-host limit, the batch size maps directly to a
+	// SQL LIMIT and the common case stays as cheap as before.
+	if b.batchSize > 0 && b.limitPerHost <= 0 {
 		query += " LIMIT " + strconv.Itoa(b.batchSize)
 	}
 
@@ -91,10 +100,8 @@ func (b *batchBuilder) FetchJobs() (model.JobList, error) {
 	}
 	defer rows.Close()
 
-	jobs := make(model.JobList, 0, b.batchSize)
-	hosts := make(map[string]int)
+	selector := newJobSelector(b.batchSize, b.limitPerHost)
 	nbRows := 0
-	nbSkippedFeeds := 0
 
 	for rows.Next() {
 		var job model.Job
@@ -104,22 +111,9 @@ func (b *batchBuilder) FetchJobs() (model.JobList, error) {
 
 		nbRows++
 
-		if b.limitPerHost > 0 {
-			feedHostname := urllib.Domain(job.FeedURL)
-			if hosts[feedHostname] >= b.limitPerHost {
-				slog.Debug("Feed host limit reached for this batch",
-					slog.String("feed_url", job.FeedURL),
-					slog.String("feed_hostname", feedHostname),
-					slog.Int("limit_per_host", b.limitPerHost),
-					slog.Int("current", hosts[feedHostname]),
-				)
-				nbSkippedFeeds++
-				continue
-			}
-			hosts[feedHostname]++
+		if selector.offer(job) {
+			break
 		}
-
-		jobs = append(jobs, job)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -129,9 +123,78 @@ func (b *batchBuilder) FetchJobs() (model.JobList, error) {
 	slog.Info("Created a batch of feeds",
 		slog.Int("batch_size", b.batchSize),
 		slog.Int("rows_count", nbRows),
-		slog.Int("skipped_feeds_count", nbSkippedFeeds),
-		slog.Int("jobs_count", len(jobs)),
+		slog.Int("skipped_feeds_count", selector.skipped),
+		slog.Int("jobs_count", len(selector.jobs)),
 	)
 
-	return jobs, nil
+	return selector.jobs, nil
+}
+
+// jobSelector builds a batch of jobs while optionally enforcing a per-host limit.
+//
+// Jobs must be offered in next_check_at ascending order (oldest due first). When a
+// per-host limit is set and a host has already reached it, the offered job is skipped
+// so that jobs from other hosts — which appear later in the ordering — can still fill
+// the batch. This prevents a single host with a large backlog of overdue feeds from
+// monopolizing every batch and starving feeds hosted elsewhere.
+type jobSelector struct {
+	batchSize    int
+	limitPerHost int
+	hostCounts   map[string]int
+	jobs         model.JobList
+	skipped      int
+}
+
+func newJobSelector(batchSize, limitPerHost int) *jobSelector {
+	capacity := batchSize
+	if capacity < 0 {
+		capacity = 0
+	}
+	return &jobSelector{
+		batchSize:    batchSize,
+		limitPerHost: limitPerHost,
+		hostCounts:   make(map[string]int),
+		jobs:         make(model.JobList, 0, capacity),
+	}
+}
+
+// offer considers a single candidate job and returns true once the batch is full,
+// signalling that no further jobs need to be offered. Jobs whose host has reached the
+// per-host limit are skipped rather than ending the batch, so later jobs from other
+// hosts can still be selected.
+func (s *jobSelector) offer(job model.Job) (full bool) {
+	if s.limitPerHost > 0 {
+		feedHostname := urllib.Domain(job.FeedURL)
+		if s.hostCounts[feedHostname] >= s.limitPerHost {
+			s.skipped++
+			return s.isFull()
+		}
+		s.hostCounts[feedHostname]++
+	}
+
+	s.jobs = append(s.jobs, job)
+	return s.isFull()
+}
+
+func (s *jobSelector) isFull() bool {
+	return s.batchSize > 0 && len(s.jobs) >= s.batchSize
+}
+
+// SelectJobsWithHostLimit selects up to batchSize jobs from candidates while allowing at
+// most limitPerHost jobs per feed hostname (limitPerHost <= 0 disables the per-host
+// limit). Candidates must be ordered by next_check_at ascending (oldest due first).
+//
+// Jobs from a host that has reached the limit are skipped so the remaining batch slots
+// can be filled fairly from other hosts, preventing a single busy host from starving
+// feeds hosted elsewhere over successive batches. This is the shared selection that
+// FetchJobs applies (while streaming) for every batch-refresh entry point: the
+// background scheduler, the manual batch refresh, and the API/UI refresh handlers.
+func SelectJobsWithHostLimit(candidates model.JobList, batchSize, limitPerHost int) model.JobList {
+	selector := newJobSelector(batchSize, limitPerHost)
+	for _, job := range candidates {
+		if selector.offer(job) {
+			break
+		}
+	}
+	return selector.jobs
 }
